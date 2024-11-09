@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +9,9 @@ import (
 	"net/http"
 	"strconv"
 	"text/template"
+
+	sql "github.com/empijei/def-prog-exercises/safesql"
+	"github.com/empijei/def-prog-exercises/safesql/legacyconversions"
 
 	_ "embed"
 )
@@ -38,7 +40,8 @@ func scanNote(rows *sql.Rows) (nt note, err error) {
 }
 
 func (nh *notesHandler) initialize(ctx context.Context) error {
-	must(nh.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)`))
+	must(nh.db.ExecContext(ctx, legacyconversions.RiskilyAssumeTrustedSQL(
+		`CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)`)))
 	nts, err := nh.getNotes(ctx)
 	if err != nil {
 		return err
@@ -55,7 +58,7 @@ func (nh *notesHandler) initialize(ctx context.Context) error {
 
 func (nh *notesHandler) getNotes(ctx context.Context) ([]note, error) {
 	// Retrieve notes
-	rows, err := nh.db.QueryContext(ctx, `SELECT * FROM notes`)
+	rows, err := nh.db.QueryContext(ctx, legacyconversions.RiskilyAssumeTrustedSQL(`SELECT * FROM notes`))
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +78,12 @@ func (nh *notesHandler) getNotes(ctx context.Context) ([]note, error) {
 }
 
 func (nh *notesHandler) putNote(ctx context.Context, nt note) error {
-	_, err := nh.db.ExecContext(ctx, `INSERT INTO notes(title, content) VALUES('`+nt.Title+`', '`+nt.Content+`')`)
+	_, err := nh.db.ExecContext(ctx, legacyconversions.RiskilyAssumeTrustedSQL(`INSERT INTO notes(title, content) VALUES('`+nt.Title+`', '`+nt.Content+`')`))
 	return err
 }
 
 func (nh *notesHandler) getNote(ctx context.Context, id int) (note, error) {
-	rows, err := nh.db.QueryContext(ctx, `SELECT * FROM notes WHERE id = `+strconv.Itoa(id))
+	rows, err := nh.db.QueryContext(ctx, legacyconversions.RiskilyAssumeTrustedSQL(`SELECT * FROM notes WHERE id = `+strconv.Itoa(id)))
 	if err != nil {
 		return note{}, err
 	}
@@ -96,7 +99,7 @@ func (nh *notesHandler) getNote(ctx context.Context, id int) (note, error) {
 }
 
 func (nh *notesHandler) deleteNote(ctx context.Context, id int) error {
-	_, err := nh.db.ExecContext(ctx, `DELETE FROM notes WHERE id = `+strconv.Itoa(id))
+	_, err := nh.db.ExecContext(ctx, legacyconversions.RiskilyAssumeTrustedSQL(`DELETE FROM notes WHERE id = `+strconv.Itoa(id)))
 	return err
 }
 

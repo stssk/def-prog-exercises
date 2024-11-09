@@ -3,7 +3,6 @@ package safesql
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"strconv"
 
 	"github.com/empijei/def-prog-exercises/safesql/internal/raw"
@@ -51,7 +50,10 @@ type DB struct {
 	db *sql.DB
 }
 
-func OpenDB(c driver.Connector) DB { return DB{sql.OpenDB(c)} }
+func Open(driverName, dataSourceName string) (*DB, error) {
+	d, err := sql.Open(driverName, dataSourceName)
+	return &DB{d}, err
+}
 
 func (db *DB) QueryContext(ctx context.Context,
 	query TrustedSQL, args ...any) (*Rows, error) {

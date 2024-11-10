@@ -8,10 +8,12 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 
 	"github.com/empijei/def-prog-exercises/app"
+	"github.com/empijei/def-prog-exercises/safeauth"
 )
 
 func main() {
-	ctx := context.Background()
+	// The root/startup context has all rights.
+	ctx := safeauth.Grant(context.Background(), "read", "write", "delete")
 	auth := app.Auth(ctx)
 
 	sm := http.NewServeMux()
@@ -28,8 +30,11 @@ func main() {
 
 	addr := "localhost:8080"
 	s := &http.Server{
-		Addr:    addr,
-		Handler: sm,
+		Addr: addr,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = auth.Preprocess(r)
+			sm.ServeHTTP(w, r)
+		}),
 	}
 	log.Println("Ready to accept connections on " + addr)
 	log.Fatal(s.ListenAndServe())

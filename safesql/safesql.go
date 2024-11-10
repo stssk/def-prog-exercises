@@ -3,8 +3,10 @@ package safesql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 
+	"github.com/empijei/def-prog-exercises/safeauth"
 	"github.com/empijei/def-prog-exercises/safesql/internal/raw"
 )
 
@@ -57,9 +59,15 @@ func Open(driverName, dataSourceName string) (*DB, error) {
 
 func (db *DB) QueryContext(ctx context.Context,
 	query TrustedSQL, args ...any) (*Rows, error) {
+	if !safeauth.Must(ctx) {
+		return nil, errors.New("missing auth check")
+	}
 	return db.db.QueryContext(ctx, query.s, args...)
 }
 func (db *DB) ExecContext(ctx context.Context,
 	query TrustedSQL, args ...any) (Result, error) {
+	if !safeauth.Must(ctx) {
+		return nil, errors.New("missing auth check")
+	}
 	return db.db.ExecContext(ctx, query.s, args...)
 }

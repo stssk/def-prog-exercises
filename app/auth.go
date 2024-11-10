@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/empijei/def-prog-exercises/safeauth"
 	"github.com/empijei/def-prog-exercises/safesql"
 	sql "github.com/empijei/def-prog-exercises/safesql"
 
@@ -21,34 +22,55 @@ import (
 var fs embed.FS
 
 var defaultUsers = []user{
-	{Name: "admin", password: "admin", Privileges: "|read|write|delete|"},
-	{Name: "reader", password: "reader", Privileges: "|read|"},
-	{Name: "editor", password: "editor", Privileges: "|read|write|"},
+	{Name: "admin", password: "admin", privileges: "|read|write|delete|"},
+	{Name: "reader", password: "reader", privileges: "|read|"},
+	{Name: "editor", password: "editor", privileges: "|read|write|"},
 }
 
 type user struct {
 	Id                         int
-	Name, password, Privileges string
+	Name, password, privileges string
 }
 
 func (u user) Can(priv string) bool {
-	return strings.Contains(u.Privileges, "|"+priv+"|")
+	return strings.Contains(u.privileges, "|"+priv+"|")
+}
+func (u user) privilegeSet() []string {
+	return strings.Split(strings.Trim(u.privileges, "|"), "|")
 }
 
 type AuthHandler struct {
 	db *sql.DB
-	sm *http.ServeMux
+	sm http.Handler
 }
 
 func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ah.sm.ServeHTTP(w, r)
 }
 func (ah *AuthHandler) IsLogged(r *http.Request) bool {
-	u, err := ah.getUser(r)
-	if err != nil {
-		return false
+	_, ok := r.Context().Value(userKey{}).(*user)
+	return ok
+}
+func (ah *AuthHandler) UserForRequest(r *http.Request) (*user, error) {
+	u, ok := r.Context().Value(userKey{}).(*user)
+	if !ok {
+		return nil, errors.New("no user for the request")
 	}
-	return u.Name != ""
+	return u, nil
+}
+
+type userKey struct{}
+
+func (ah *AuthHandler) Preprocess(r *http.Request) *http.Request {
+	ctx := r.Context()
+	u, err := ah.getUserFromDB(r.WithContext(safeauth.Grant(ctx /*No privileges during preprocess*/)))
+	if err != nil {
+		return r.WithContext(safeauth.Grant(ctx /*User recognition failed, empty privileges set*/))
+	}
+	ctx = context.WithValue(ctx, userKey{}, u)
+	ctx = safeauth.Grant(ctx, u.privilegeSet()...)
+	u.privileges = "" // Clear user privileges
+	return r.WithContext(ctx)
 }
 
 func (ah *AuthHandler) getUserCount(ctx context.Context) (int, error) {
@@ -79,7 +101,7 @@ func (ah *AuthHandler) createDefault(ctx context.Context) error {
 	}
 	log.Println("Default users not found, initializing...")
 	for _, u := range defaultUsers {
-		_, err := ah.db.ExecContext(ctx, safesql.New(`INSERT INTO users(name, password, privileges) VALUES(?,?,?)`), u.Name, u.password, u.Privileges)
+		_, err := ah.db.ExecContext(ctx, safesql.New(`INSERT INTO users(name, password, privileges) VALUES(?,?,?)`), u.Name, u.password, u.privileges)
 		if err != nil {
 			return err
 		}
@@ -89,6 +111,10 @@ func (ah *AuthHandler) createDefault(ctx context.Context) error {
 }
 
 func (ah *AuthHandler) initialize(ctx context.Context) error {
+	ctx, ok := safeauth.Check(ctx, "read", "write")
+	if !ok {
+		return errors.New("cannot initialize: don't have write access")
+	}
 	_, err := ah.db.ExecContext(ctx, safesql.New(`
 		CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, password TEXT, privileges TEXT)`))
 	if err != nil {
@@ -101,15 +127,7 @@ func (ah *AuthHandler) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (ah *AuthHandler) hasPrivilege(r *http.Request, priv string) bool {
-	u, err := ah.getUser(r)
-	if err != nil {
-		return false
-	}
-	return u.Can(priv)
-}
-
-func (ah *AuthHandler) getUser(r *http.Request) (*user, error) {
+func (ah *AuthHandler) getUserFromDB(r *http.Request) (*user, error) {
 	c, err := r.Cookie("userid")
 	if err != nil {
 		return nil, err
@@ -123,13 +141,14 @@ func (ah *AuthHandler) getUser(r *http.Request) (*user, error) {
 	// BUT PLEASE, PLEASE, PLEASE never rely on client-provided
 	// data to perform auth checks unless it's signed and you validated
 	// the sgnature.
-	rows, err := ah.db.QueryContext(r.Context(), safesql.New(`SELECT * FROM users WHERE id=?`), c.Value)
+	ctx, _ := safeauth.Check(r.Context() /*Anyone can get their own info*/)
+	rows, err := ah.db.QueryContext(ctx, safesql.New(`SELECT * FROM users WHERE id=?`), c.Value)
 	if err != nil || !rows.Next() {
 		return nil, err
 	}
 	defer rows.Close()
 	var u user
-	if err := rows.Scan(&(u.Id), &(u.Name), &(u.password), &(u.Privileges)); err != nil {
+	if err := rows.Scan(&(u.Id), &(u.Name), &(u.password), &(u.privileges)); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -159,13 +178,18 @@ func (ah *AuthHandler) login(w http.ResponseWriter, id int) {
 }
 
 func Auth(ctx context.Context) *AuthHandler {
-	sm := http.NewServeMux()
 	db := must(sql.Open("sqlite", "./users.db"))
-	ah := &AuthHandler{db, sm}
+	ah := &AuthHandler{db: db}
 	if err := ah.initialize(ctx); err != nil {
 		log.Fatalf("Cannot initialize auth: %v", err)
 	}
+	// Make sure to not have a high-privilege context in scope
+	ah.setupRoutes()
+	return ah
+}
 
+func (ah *AuthHandler) setupRoutes() {
+	sm := http.NewServeMux()
 	sm.HandleFunc("GET /auth/", func(w http.ResponseWriter, r *http.Request) {
 		f, err := fs.Open("auth.html")
 		if err != nil {
@@ -186,7 +210,7 @@ func Auth(ctx context.Context) *AuthHandler {
 	})
 	sm.HandleFunc("POST /auth/", func(w http.ResponseWriter, r *http.Request) {
 		u, pw := r.FormValue("name"), r.FormValue("password")
-		rows, err := db.QueryContext(r.Context(), safesql.New(`SELECT id FROM users WHERE name=? and password=?`), u, pw)
+		rows, err := ah.db.QueryContext(r.Context(), safesql.New(`SELECT id FROM users WHERE name=? and password=?`), u, pw)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			io.WriteString(w, err.Error())
@@ -213,5 +237,8 @@ Invalid creadentials. <a href="/auth">Go back</a>
 		ah.logout(w)
 		http.Redirect(w, r, "/auth/", http.StatusFound)
 	})
-	return ah
+	ah.sm = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, _ := safeauth.Check(r.Context())
+		sm.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

@@ -12,6 +12,7 @@ import (
 
 	"embed"
 
+	safeauth "github.com/stssk/def-prog-exercises/safeauth"
 	"github.com/stssk/def-prog-exercises/safesql"
 	sql "github.com/stssk/def-prog-exercises/safesql"
 )
@@ -52,6 +53,7 @@ func (ah *AuthHandler) IsLogged(r *http.Request) bool {
 }
 
 func (ah *AuthHandler) getUserCount(ctx context.Context) (int, error) {
+	safeauth.Check(ctx, "read")
 	rows, err := ah.db.QueryContext(ctx, safesql.New(`SELECT COUNT(*) FROM users`))
 	if err != nil {
 		return 0, err
@@ -109,6 +111,7 @@ func (ah *AuthHandler) hasPrivilege(r *http.Request, priv string) bool {
 }
 
 func (ah *AuthHandler) getUser(r *http.Request) (*user, error) {
+	safeauth.Check(r.Context(), "read")
 	c, err := r.Cookie("userid")
 	if err != nil {
 		return nil, err

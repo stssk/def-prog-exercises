@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	safeauth "github.com/stssk/def-prog-exercises/safeauth"
 	"github.com/stssk/def-prog-exercises/safesql/internal/raw"
 )
 
@@ -22,6 +23,10 @@ type DB struct {
 }
 
 func (db *DB) QueryContext(ctx context.Context, query TrustedSQL, args ...interface{}) (*Rows, error) {
+	err := safeauth.Must(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return db.db.QueryContext(ctx, query.s, args...)
 }
 

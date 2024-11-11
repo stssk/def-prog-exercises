@@ -7,10 +7,11 @@ import (
 
 	_ "github.com/glebarez/go-sqlite"
 	"github.com/stssk/def-prog-exercises/app"
+	safeauth "github.com/stssk/def-prog-exercises/safeauth"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx := safeauth.Grant(context.Background(), "read", "write", "delete")
 	auth := app.Auth(ctx)
 
 	sm := http.NewServeMux()

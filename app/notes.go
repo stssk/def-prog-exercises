@@ -11,6 +11,7 @@ import (
 
 	_ "embed"
 
+	safeauth "github.com/stssk/def-prog-exercises/safeauth"
 	"github.com/stssk/def-prog-exercises/safesql"
 	sql "github.com/stssk/def-prog-exercises/safesql"
 )
@@ -39,6 +40,7 @@ func scanNote(rows *sql.Rows) (nt note, err error) {
 }
 
 func (nh *notesHandler) initialize(ctx context.Context) error {
+	safeauth.Must(ctx)
 	must(nh.db.ExecContext(ctx, safesql.New(`CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT)`)))
 	nts, err := nh.getNotes(ctx)
 	if err != nil {
@@ -55,6 +57,7 @@ func (nh *notesHandler) initialize(ctx context.Context) error {
 }
 
 func (nh *notesHandler) getNotes(ctx context.Context) ([]note, error) {
+	safeauth.Check(ctx, "read")
 	// Retrieve notes
 	rows, err := nh.db.QueryContext(ctx, safesql.New(`SELECT * FROM notes`))
 	if err != nil {
@@ -76,11 +79,13 @@ func (nh *notesHandler) getNotes(ctx context.Context) ([]note, error) {
 }
 
 func (nh *notesHandler) putNote(ctx context.Context, nt note) error {
+	safeauth.Check(ctx, "write")
 	_, err := nh.db.ExecContext(ctx, safesql.New(`INSERT INTO notes(title, content) VALUES(?, ?)`), nt.Title, nt.Content)
 	return err
 }
 
 func (nh *notesHandler) deleteNote(ctx context.Context, id int) error {
+	safeauth.Check(ctx, "delete")
 	_, err := nh.db.ExecContext(ctx, safesql.New(`DELETE FROM notes WHERE id = ?`), strconv.Itoa(id))
 	return err
 }

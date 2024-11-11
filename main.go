@@ -6,8 +6,7 @@ import (
 	"net/http"
 
 	_ "github.com/glebarez/go-sqlite"
-
-	"github.com/empijei/def-prog-exercises/app"
+	"github.com/stssk/def-prog-exercises/app"
 )
 
 func main() {
